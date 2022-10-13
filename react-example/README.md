@@ -1,6 +1,6 @@
 # Running
 
-App created bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+App bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
 
 ## Try it out
 
