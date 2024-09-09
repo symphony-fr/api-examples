@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API Key Input</title>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+</head>
+<body>
+    <form id="symphonyForm">
+        Symphony API key: <input type="password" id="symphonyKey" name="symphonyKey">
+        <input type="submit" value="Save">
+    </form>
+    <form id="openForm">
+        Open API key: <input type="password" id="openKey" name="openKey">
+        <input type="submit" value="Save">
+    </form>
+    <div>
+        Language: <b id="currentLang"></b> <button id="langSwitch">Switch Language</button>
+    </div>
+    <div>
+        Use recommended portion sizes: <input type="checkbox" id="portionSize" name="portionSize">
+    </div>
+    <div>
+        Use custom instructions: <input type="checkbox" id="customInstructions" name="customInstructions">
+    </div>
+    <div id="numberSelectorDiv">
+        Number of recipes: <input type="number" id="numberSelector" min="1" max="10">
+    </div>
+    <div id="instructionDiv" style="display: none;">
+        Instructions: <textarea id="instructionText" name="instructionText" rows="32" style="width: min(100%,800px);"></textarea>
+    </div>
+    <div id="promptDiv">
+        Prompt: <input type="text" id="chatText" name="chatText">
+    </div>
+    <form id="chatForm">
+        <input type="submit" value="Generate">
+    </form>
+    <div id="response"></div>
+    <div id="recipeLinks"></div>
+    <div id="loading" style="display: none;">Loading...</div>
+
+    <script>
+        $(document).ready(function(){
+            var openKey;
+            var symphonyKey;
+            var ingredients;
+
+            var lang = document.cookie.split(';').some((item) => item.trim().startsWith('lang=')) ? document.cookie.split('; ').find(row => row.startsWith('lang')).split('=')[1] : 'fr';
+            $("#currentLang").text(lang);
+            const ingredientTitle = (lang,ing)=> ing['title' + lang.charAt(0).toUpperCase() + lang.slice(1)].split(',')[0]
+            const findIngredient = name=> ingredients.find(ingr=>ingredientTitle(lang,ingr).toLocaleLowerCase() == name.toLocaleLowerCase());
+
+            var selectedNumber = document.cookie.split(';').some((item) => item.trim().startsWith('selectedNumber=')) ? document.cookie.split('; ').find(row => row.startsWith('selectedNumber')).split('=')[1] : '1';
+            $('#numberSelector').val(selectedNumber);
+            // Save to cookies when the number selector changes
+            $('#numberSelector').change(function() {
+                selectedNumber = $(this).val();
+                document.cookie = "selectedNumber=" + selectedNumber;
+            });
+
+            var usePortionSizes = document.cookie.split(';').some((item) => item.trim().startsWith('usePortionSizes=')) ? document.cookie.split('; ').find(row => row.startsWith('usePortionSizes')).split('=')[1] === 'true' : true;
+            $('#portionSize').prop('checked', usePortionSizes);
+            // Save to cookies when the portionSize checkbox changes
+            $('#portionSize').change(function() {
+                usePortionSizes = $(this).is(':checked');
+                document.cookie = "usePortionSizes=" + usePortionSizes;
+            });
+
+            var useCustomInstructions = document.cookie.split(';').some((item) => item.trim().startsWith('useCustomInstructions=')) ? document.cookie.split('; ').find(row => row.startsWith('useCustomInstructions')).split('=')[1] === 'true' : false;
+            $('#customInstructions').prop('checked', useCustomInstructions);
+            // Save to cookies when the customInstructions checkbox changes
+            $('#customInstructions').change(function() {
+                useCustomInstructions = $(this).is(':checked');
+                document.cookie = "useCustomInstructions=" + useCustomInstructions;
+                refreshInputMode();
+            });
+
+            var instructionText = localStorage.getItem('instructionText') || '';
+            $('#instructionText').val(instructionText);
+            // Save to localStorage when the instructionText changes
+            $('#instructionText').change(function() {
+                instructionText = $(this).val();
+                localStorage.setItem('instructionText', instructionText);
+            });
+
+            var getInstruction = (lang)=> ({
+                en: `return a JSON array of ${selectedNumber} objects where each object is a savory recipe using only the ingredients listed above. Format should be [{"chickpeas": 0.8, "salt": 0.3,...},...] where each value represents how strongly present the ingredient should be in the meal (between 0 and 1, 0.5 being the average, e.g. 1.0 being a key ingredient and 0.1 being barely noticed). Return only the JSON and no other text. If an ingredient is not on the list above, use the most similar ingredient from the list. The recipes should match the following prompt: `,
+                fr: `Écrit un tableau JSON de ${selectedNumber} objets où chaque objet est une recette salée utilisant uniquement les ingrédients listés ci-dessus. Le format doit être [{"pois chiches": 0.8, "sel": 0.3,...},...] où chaque valeur représente à quel point l'ingrédient doit être présent dans le repas (entre 0 et 1, 0.5 étant la moyenne, par exemple 1.0 étant un ingrédient clé et 0.1 étant à peine remarqué). Retourne uniquement le JSON et pas d'autre texte. Si un ingrédient n'est pas sur la liste ci-dessus, utilisez l'ingrédient le plus similaire de la liste. Les recettes doivent correspondre au prompt suivante: `,
+            }[lang])
+
+            function refreshInputMode() {
+                if (useCustomInstructions) {
+                    $('#numberSelectorDiv').hide();
+                    $('#promptDiv').hide();
+                    $('#instructionDiv').show();
+                } else {
+                    $('#numberSelectorDiv').show();
+                    $('#promptDiv').show();
+                    $('#instructionDiv').hide();
+                }
+            }
+            refreshInputMode();
+
+            if (document.cookie.split(';').some((item) => item.trim().startsWith('symphonyKey='))) {
+                symphonyKey = document.cookie.split('; ').find(row => row.startsWith('symphonyKey')).split('=')[1];
+                $('#symphonyKey').val(symphonyKey);
+                loadIngredients(symphonyKey);
+            }
+            if (document.cookie.split(';').some((item) => item.trim().startsWith('openKey='))) {
+                openKey = document.cookie.split('; ').find(row => row.startsWith('openKey')).split('=')[1];
+                $('#openKey').val(openKey);
+            }
+
+            $('#symphonyForm').submit(function(e){
+                e.preventDefault();
+                symphonyKey = $('#symphonyKey').val();
+                document.cookie = "symphonyKey=" + symphonyKey;
+                loadIngredients(symphonyKey);
+            });
+
+            $('#openForm').submit(function(e){
+                e.preventDefault();
+                openKey = $('#openKey').val();
+                document.cookie = "openKey=" + openKey;
+            });
+
+            $('#chatForm').submit(function(e){
+                e.preventDefault();
+                var chatText = $('#chatText').val();
+                var usePortionSizes = $('#portionSize').is(':checked');
+
+                if (!openKey) {
+                    alert("Open API key is not defined. Please enter and save it first.");
+                    return;
+                }
+                if (!ingredients) {
+                    alert("Symphony API key is not defined. Please enter and save it first.");
+                    return;
+                }
+
+                $("#response").empty();
+                $("#recipeLinks").empty();
+                $('#loading').show();
+
+                var instructionContent = useCustomInstructions ? instructionText : ingredients.map(ingr=> ingredientTitle(lang,ingr)) +'\n-----\n\n' +getInstruction(lang) +'\n\n\n> ' +chatText;
+
+                $.ajax({
+                    url: 'https://api.openai.com/v1/chat/completions',
+                    type: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + openKey
+                    },
+                    data: JSON.stringify({
+                        'model': 'gpt-4o',
+                        'messages': [
+                            {
+                                'role': 'user',
+                                'content': instructionContent
+                            }
+                        ]
+                    }),
+                    success: function(data) {
+                        $('#loading').hide();
+                        var content = data.choices[0].message.content;
+                        var jsonStart = content.indexOf('[');
+                        var jsonEnd = content.lastIndexOf(']') + 1;
+                        var jsonArray = JSON.parse(content.slice(jsonStart, jsonEnd));
+                        var markdownText = jsonArray.map(function(obj, index) {
+                            var recipe = [];
+                            const markdown = Object.entries(obj).map(function([key, value]) {
+                                const foundIng = findIngredient(key);
+                                if(foundIng) recipe[foundIng.numId] = usePortionSizes ? foundIng.portion * value : value;
+                                return '- ' + key + ': ['+value+']'
+                                    +(foundIng && usePortionSizes ? ' '+(recipe[foundIng.numId].toPrecision(2)*1): '')
+                                    +(!foundIng ? ' !!!!!!!!!!!!!!!' : '')
+                                // return '- ' + key + ': ['+value+'] '+(foundIng ? ''+((value*foundIng.portion*100).toPrecision(2)*1)+' %, '+((value*foundIng.portion*450).toPrecision(2)*1)+' g' : '['+value+'] !!!!!!!!!!!!!!!');
+                            }).join('<br/>');
+                            for(i=0;i<recipe.length;i++) recipe[i] = recipe[i] || 0;
+                            // now the recipe array is complete
+                            // Call the API to save the recipe
+                            $.ajax({
+                                url: 'https://symphony.fr/api/v1/recipes?api_key=' + symphonyKey,
+                                type: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json'
+                                },
+                                data: JSON.stringify({
+                                    'title': chatText || 'no-title',
+                                    'quantities': recipe,
+                                    'normalize_quantity': true
+                                }),
+                                success: function(recipeData) {
+                                    var url = recipeData.data.url.replace('https://symphony.fr/','https://next.symphony.fr/')
+                                    var link = '<a href="' + url + '">Recipe ' + (index + 1) + ': ' + chatText + '</a><br/>';
+                                    $('#recipeLinks').append(markdown+'<br/>'+link+'<br/>-----');
+
+                                }
+                            });
+                            return markdown;
+                        }).join('<br/>---<br/>');
+
+                        // $('#response').html(markdownText);
+                    }
+                });
+            });
+
+            $('#langSwitch').click(function(){
+                lang = lang == 'fr' ? 'en' : 'fr';
+                $("#currentLang").text(lang);
+                document.cookie = "lang=" + lang;
+                // location.reload();
+            });
+
+            function loadIngredients(symphonyKey) {
+                $.ajax({
+                    url: 'https://next.symphony.fr/api/v1/ingredients?api_key=' + symphonyKey,
+                    type: 'GET',
+                    success: function(data) {
+                        ingredients = data.data;
+                        console.log(ingredients);
+                        console.log(ingredients.map(function(item) {
+                            return item.titleEn;
+                        }));
+                    }
+                });
+            }
+        });
+    </script>
+</body>
+</html>
+
+
+
