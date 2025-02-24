@@ -190,7 +190,6 @@
                                     'normalize_quantity': true
                                 }),
                                 success: function(recipeData) {
-                                    var url = recipeData.data.url.replace('https://symphony.fr/','https://next.symphony.fr/')
                                     var link = '<a href="' + url + '">Recipe ' + (index + 1) + ': ' + chatText + '</a><br/>';
                                     $('#recipeLinks').append(markdown+'<br/>'+link+'<br/>-----');
 
@@ -213,7 +212,7 @@
 
             function loadIngredients(symphonyKey) {
                 $.ajax({
-                    url: 'https://next.symphony.fr/api/v1/ingredients?api_key=' + symphonyKey,
+                    url: 'https://symphony.fr/api/v1/ingredients?api_key=' + symphonyKey,
                     type: 'GET',
                     success: function(data) {
                         ingredients = data.data;
